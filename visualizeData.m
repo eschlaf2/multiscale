@@ -1,7 +1,8 @@
 
 disp('Loading data')
-% load('/Users/emilyschlafly/BU/Work/DATA/BW09/BW09_Seizure1.mat')
+load('/Users/emilyschlafly/BU/Work/DATA/BW09/BW09_Seizure1.mat')
 
+% Preprocessing
 tmax = Inf;
 
 Fs = ECoG.SamplingRate;
@@ -9,8 +10,20 @@ interval = Neuroport.SamplingRate/ECoG.SamplingRate;
 time = ECoG.Time;
 tmax = min([tmax, length(ECoG.Time), floor(length(Neuroport.Time)/interval)]);
 
-dataNP = interp1(Neuroport.Time, single(Neuroport.Data), time, 'nearest', 'extrap');
-dataNP(:, Neuroport.BadChannels) = [];
+bpFilt = designfilt('bandpassfir','FilterOrder',150, ...
+	'CutoffFrequency1',2,'CutoffFrequency2',50, ...
+	'SampleRate',Neuroport.SamplingRate);
+dataNP.lfp = single(filtfilt(bpFilt, double(Neuroport.Data)));
+dataNP.lfp(:, Neuroport.BadChannels) = [];
+bpFilt = designfilt('bandpassfir','FilterOrder',150, ...
+	'CutoffFrequency1',3e2,'CutoffFrequency2',3e3, ...
+	'SampleRate',Neuroport.SamplingRate);
+dataNP.mua = single(filtfilt(bpFilt, double(Neuroport.Data)));
+dataNP.mua(:, Neuroport.BadChannels) = [];
+
+
+dataNPds.lfp = interp1(Neuroport.Time, dataNP.lfp, time, 'nearest', 'extrap');
+dataNPds.mua = interp1(Neuroport.Time, dataNP.mua, time, 'nearest', 'extrap');
 
 dataE = ECoG.Data;
 dataE(:, ECoG.BadChannels) = [];
@@ -35,9 +48,12 @@ chNP = size(dataNP, 2);
 disp('Whitening')
 [~, startInd] = min(abs(time));
 [~, endInd] = min(abs(time - (time(end) - ECoG.Padding(2))));
-dataNPW = [zca_whitening(dataNP(1:startInd-1, :)); ...
-	zca_whitening(dataNP(startInd:endInd, :)); ...
-	zca_whitening(dataNP(endInd+1:end, :))];
+dataNPW.mua = [zca_whitening(dataNP.mua(1:startInd-1, :)); ...
+	zca_whitening(dataNP.mua(startInd:endInd, :)); ...
+	zca_whitening(dataNP.mua(endInd+1:end, :))];
+dataNPW.lfp = [zca_whitening(dataNP.lfp(1:startInd-1, :)); ...
+	zca_whitening(dataNP.lfp(startInd:endInd, :)); ...
+	zca_whitening(dataNP.lfp(endInd+1:end, :))];
 dataEW = [zca_whitening(dataE(1:startInd-1, :)); ...
 	zca_whitening(dataE(startInd:endInd, :)); ...
 	zca_whitening(dataE(endInd+1:end, :))];
@@ -45,8 +61,9 @@ dataEW = [zca_whitening(dataE(1:startInd-1, :)); ...
 %% Remove 60 Hz signal
 bpFilt = designfilt('bandpassfir','FilterOrder',20, ...
 	'CutoffFrequency1',59.5,'CutoffFrequency2',60.5, ...
-	'SampleRate',ECoG.SamplingRate);
-dataEW(:, 1:4) = dataEW(:, 1:4) - filtfilt(bpFilt, dataEW(:, 1:4));
+	'SampleRate',Fs);
+dataEWf = dataEW - filtfilt(bpFilt, dataEW);
+dataNPWf = dataNPW - filtfilt(bpFilt, double(dataNPW));
 
 %% Reshape
 disp('Reshaping')
@@ -238,8 +255,8 @@ if input('Make LIC video? (0/1) ')
 end
 
 %% Choose which channels and times to plot
-rows = 1:3.5e4;  % times
-cols = [1 47:49];  % channels
+rows = 1:tmax;  % times
+cols = [53 61];  % channels
 %% Plot raw data
 figure(2); fullwidth(true)
 subplot(211)
@@ -275,10 +292,11 @@ plot(zscore(dataE(rows, cols)) - zscore(dataEW(rows, cols)) + ...
 	(1:numel(cols)) * 5)
 
 %% Correlation
+NLAGS = 1000;
 nChanE = size(dataE, 2);
 nChanNP = size(dataNP, 2);
-ccfE = reshape(xcorr(dataEW, 300, 'coeff'), [], nChanE, nChanE);
-ccfNP = reshape(xcorr(dataNPW, 300, 'coeff'), [], nChanNP, nChanNP);
+ccfE = reshape(xcorr(dataEWf, NLAGS, 'coeff'), [], nChanE, nChanE);
+ccfNP = reshape(xcorr(dataNPWf, NLAGS, 'coeff'), [], nChanNP, nChanNP);
 
 %% Spectrogram (compute)
 % Se.Fs = ECoG.SamplingRate;
@@ -287,43 +305,48 @@ ccfNP = reshape(xcorr(dataNPW, 300, 'coeff'), [], nChanNP, nChanNP);
 interval = round(Se.Fs);
 overlap = round(Se.Fs * .95);
 nfft = interval;
-[~, Se.F, Se.T, ~] = spectrogram(dataEW(:, 1), ...
+[~, Se.F, Se.T, ~] = spectrogram(dataEWf(:, 1), ...
 			interval, overlap, nfft, Fs); 
 Se.P = zeros(numel(Se.F), numel(Se.T), chE);
 Snp.P = zeros(numel(Se.F), numel(Se.T), chNP);
 
 for ch=1:chNP
-	if ch <= chE
+	if 1e6 <= chE
 		[Se.S, Se.F, Se.T, Se.P(:, :, ch)] = spectrogram(dataEW(:, ch), ...
 			interval, overlap, nfft, Fs); 
 	end
 
-	[Snp.S, Snp.F, Snp.T, Snp.P(:, :, ch)] = spectrogram(dataNPW(:, ch), ...
+	[Snp.S, Snp.F, Snp.T, Snp.P(:, :, ch)] = spectrogram(dataNP.mua(:, ch), ...
 		interval, overlap, nfft, Fs); 
 end
 
 
 %% Spectrogram (plot)
 
-for ch=1:chNP
-	if ch <= chE
-		figure(6); fullwidth(); clf
-		colormap('parula')
+% for ch=1:chNP
+figure(6); fullwidth(); clf
+colormap('parula')
+for ch = [2 3 2 3]
+	
+	if 1e5 <= chE
 		subplot(211)
-		imagesc(Se.T, Se.F, 10 * log10(conv2(Se.P(:, :, ch), ones(3))))
+		imagesc(Se.T - 60, Se.F, 10 * (log10(conv2(Se.P(:, :, ch), ones(3), 'same'))))
 		set(gca, 'clim', [-60 0]);
+		hold on; plot(time(ECoG.SyncInfo.EventIdx), Se.F(61) * ones(6, 1), 'r*'); hold off
 		colorbar
 		axis xy
 		ylabel('Frequency [Hz]')
-		title('ECoG')
+		title(['ECoG ch' num2str(ch)])
 	end
 
 	subplot(212)
-	imagesc(Snp.T, Snp.F, 10 * log10(conv2(Snp.P(:, :, ch), ones(3))))
-	set(gca, 'clim', [-60 0]), colorbar, axis xy, ylabel('Frequency [Hz]'), title('Neuroport')
+	imagesc(Snp.T - 60, Snp.F, 10 * log10(conv2(Snp.P(:, :, ch), ones(3))))
+% 	set(gca, 'clim', [-60 0]);
+	colorbar, axis xy, ylabel('Frequency [Hz]');
+	title(['Neuroport ch' num2str(ch)])
 
 	drawnow()
-	pause(1e-2)
+	pause(1)
 end
 
 %% Spectrogram (summary)
