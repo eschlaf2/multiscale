@@ -1,6 +1,6 @@
 
 disp('Loading data')
-load('/Users/emilyschlafly/BU/Work/DATA/BW09/BW09_Seizure1.mat')
+load('/Users/emilyschlafly/BU/DATA/BW09/BW09_Seizure1.mat')
 mea = Neuroport;
 ecog = ECoG;
 clear Neuroport ECoG
@@ -209,7 +209,7 @@ end
 
 [~, mea.epochs(3)] = max(diff(mea.cov));
 mea.epochs(3) = mea.dischargeTimes(3 * (mea.epochs(3) - 1) + 1);
-figure(10); plot(mea.cov)
+figure(10); plot(diff(mea.cov))
 
 
 %%
