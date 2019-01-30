@@ -8,6 +8,7 @@ Fs = ECoG.SamplingRate;
 interval = Neuroport.SamplingRate/ECoG.SamplingRate;
 time = ECoG.Time;
 tmax = min([tmax, length(ECoG.Time), floor(length(Neuroport.Time)/interval)]);
+% nanMask = 
 
 dataNP = interp1(Neuroport.Time, single(Neuroport.Data), time, 'nearest', 'extrap');
 dataNP(:, Neuroport.BadChannels) = [];
@@ -284,8 +285,8 @@ ccfNP = reshape(xcorr(dataNPW, 300, 'coeff'), [], nChanNP, nChanNP);
 % Se.Fs = ECoG.SamplingRate;
 % Snp.Fs = ECoG.SamplingRate;  % remember that you downsampled above
 
-interval = round(Se.Fs);
-overlap = round(Se.Fs * .95);
+interval = round(Fs);
+overlap = round(Fs * .95);
 nfft = interval;
 [~, Se.F, Se.T, ~] = spectrogram(dataEW(:, 1), ...
 			interval, overlap, nfft, Fs); 
